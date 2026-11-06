@@ -58,7 +58,7 @@ publishing {
             pom {
                 name.set("mideakt")
                 description.set("Native Kotlin library for local (LAN) control of Midea air conditioners")
-                url.set("https://github.com/hafaio/mideakt")
+                url.set("https://github.com/hafacc/mideakt")
                 licenses {
                     license {
                         name.set("MIT")
@@ -73,9 +73,9 @@ publishing {
                     }
                 }
                 scm {
-                    url.set("https://github.com/hafaio/mideakt")
-                    connection.set("scm:git:https://github.com/hafaio/mideakt.git")
-                    developerConnection.set("scm:git:git@github.com:hafaio/mideakt.git")
+                    url.set("https://github.com/hafacc/mideakt")
+                    connection.set("scm:git:https://github.com/hafacc/mideakt.git")
+                    developerConnection.set("scm:git:git@github.com:hafacc/mideakt.git")
                 }
             }
         }
