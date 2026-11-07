@@ -80,6 +80,12 @@ client.update { set ->
 }
 ```
 
+Setup throws `CloudLoginException` when the cloud rejects the email or password,
+and `NotInAccountException` when the AC isn't registered to that account, so an
+app can tell the two apart. When no device can be set up, the error's `failures`
+list each device with the reason it failed. Version-2 devices need no cloud key,
+so a home with only those can call `Setup.run()` with no account.
+
 ### Manual setup
 
 `Setup.run` is the high-level path. To find devices that ignore broadcasts, discover

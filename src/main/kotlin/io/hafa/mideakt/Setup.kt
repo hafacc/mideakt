@@ -1,18 +1,46 @@
 package io.hafa.mideakt
 
-/** Thrown when [Setup.run] cannot complete, e.g. no devices are found on the LAN. */
-class SetupException(message: String) : Exception(message)
+import java.util.concurrent.Executors
+
+/**
+ * Thrown when [Setup.run] can't set up any device; [failures] holds each device it tried
+ * and the error that stopped it.
+ */
+open class SetupException(
+    message: String,
+    /** Each device setup tried, with the error that stopped it; empty if none were found. */
+    val failures: List<SetupFailure> = emptyList(),
+) : Exception(message)
+
+/**
+ * Thrown when no device could be set up and the cloud reported at least one of them as not
+ * registered to the given account.
+ */
+class NotInAccountException(failures: List<SetupFailure>) :
+    SetupException("The cloud says these devices aren't in this account: ${summary(failures)}", failures)
+
+/** A version-3 device's error when setup ran without an account to fetch its key with. */
+class AccountRequiredException : Exception("A version-3 device needs a cloud key; run setup with an account")
+
+/** A discovered device that setup couldn't set up, and why. */
+data class SetupFailure(
+    /** The device as discovered. */
+    val device: DiscoveredDevice,
+    /**
+     * Why it failed: [AccountRequiredException], a [CloudException] from the key fetch, or the
+     * error from the local check, such as [HandshakeRejectedException].
+     */
+    val error: Throwable,
+)
 
 /**
  * One-shot setup: discover devices, fetch each V3 device's token/key from the
- * cloud, verify by authenticating locally, and return credentials. The only step
- * that contacts the cloud.
- *
- * Version-2 devices need no cloud token; they are verified with a local query and
- * only returned if they respond.
+ * cloud, verify every device with a local query, and return credentials. The only
+ * step that contacts the cloud.
  *
  * Takes the Midea (MSmartHome) account the devices are registered to: the cloud
- * only issues keys for the signed-in account's own devices.
+ * only issues keys for the signed-in account's own devices. Version-2 devices need
+ * no cloud token, so a home with only those can call `run()` with no account.
  *
  * ```kotlin
  * val credentials = Setup.run("you@example.com", "password").first()
@@ -22,9 +50,16 @@ class SetupException(message: String) : Exception(message)
  * needs to run again if a device is re-provisioned. To find devices that ignore
  * broadcasts, or over a particular network, run [Discovery.discover] yourself and pass
  * its result as `devices`.
+ *
+ * It returns credentials for every device it could set up, leaving out the rest. When
+ * none could be set up it throws [NotInAccountException] if the cloud said a device
+ * isn't in the account, and [SetupException] otherwise; both list each device's error.
  */
 object Setup {
-    /** Runs setup on [devices] with their owner's [account]; see [Setup]. */
+    /**
+     * Runs setup on [devices] with their owner's [account]; see [Setup]. Throws
+     * [CloudLoginException] if the cloud rejects the account.
+     */
     fun run(
         account: String,
         password: String,
@@ -32,27 +67,38 @@ object Setup {
     ): List<DeviceCredentials> = run(SmartHomeCloud(account, password), devices)
 
     /** Runs setup on [devices] against [cloud], signing in only if one is version 3; see [Setup]. */
-    fun run(cloud: SmartHomeCloud, devices: List<DiscoveredDevice> = Discovery.discover()): List<DeviceCredentials> {
+    fun run(cloud: SmartHomeCloud, devices: List<DiscoveredDevice> = Discovery.discover()): List<DeviceCredentials> =
+        provisionAll(cloud, devices)
+
+    /**
+     * Runs setup on version-2 [devices], which need no account; a version-3 device among them
+     * fails with [AccountRequiredException]. See [Setup].
+     */
+    fun run(devices: List<DiscoveredDevice> = Discovery.discover()): List<DeviceCredentials> =
+        provisionAll(null, devices)
+
+    private fun provisionAll(cloud: SmartHomeCloud?, devices: List<DiscoveredDevice>): List<DeviceCredentials> {
         if (devices.isEmpty()) throw SetupException("No devices found")
+        val session = if (cloud != null && devices.any { it.version >= 3 }) cloud.login() else null
 
-        val session = if (devices.any { it.version >= 3 }) cloud.login() else null
-
-        val outcomes = devices.map { device -> device to runCatching { credentials(device, session) } }
-        val results = outcomes.mapNotNull { (_, outcome) -> outcome.getOrNull() }
-        if (results.isEmpty()) throw provisioningFailure(outcomes)
-        return results
-    }
-
-    /** Builds the all-failed error, naming each device and the reason it couldn't be provisioned. */
-    private fun provisioningFailure(
-        outcomes: List<Pair<DiscoveredDevice, Result<DeviceCredentials>>>,
-    ): SetupException {
-        val summary = outcomes.joinToString("; ") { (device, outcome) ->
-            val cause = outcome.exceptionOrNull()
-            "${device.name} (v${device.version}): ${cause?.message ?: cause?.javaClass?.simpleName ?: "unknown"}"
+        // Each device's key fetch and local check is independent, so they run side by side.
+        val pool = Executors.newFixedThreadPool(devices.size)
+        val outcomes = try {
+            devices.map { device ->
+                pool.submit<Result<DeviceCredentials>> { runCatching { credentials(device, session) } }
+            }
+                .map { it.get() }
+        } finally {
+            pool.shutdown()
         }
-        return SetupException("Devices found, but none could be provisioned: $summary").apply {
-            outcomes.forEach { (_, outcome) -> outcome.exceptionOrNull()?.let { addSuppressed(it) } }
+
+        val results = outcomes.mapNotNull { it.getOrNull() }
+        if (results.isNotEmpty()) return results
+        val failures = devices.zip(outcomes) { device, outcome -> SetupFailure(device, outcome.exceptionOrNull()!!) }
+        throw if (failures.any { it.error is DeviceNotInAccountException }) {
+            NotInAccountException(failures)
+        } else {
+            SetupException("Devices found, but none could be set up: ${summary(failures)}", failures)
         }
     }
 
@@ -61,14 +107,15 @@ object Setup {
      *
      * A version-3 device's key comes from the cloud through [session]. The cloud may file it
      * under either byte order of the device id and answer for both, so this fetches both
-     * pairs and returns the one the device accepts. A version-2 device needs no [session].
-     * Throws the error that best explains a failure: the device refusing a key, then
+     * pairs and returns the one the device accepts. A version-2 device needs no [session];
+     * a version-3 device without one throws [AccountRequiredException]. Otherwise it throws
+     * the error that best explains a failure: the device refusing a key, then
      * [DeviceNotInAccountException], then any other cloud error.
      */
     @Suppress("TooGenericExceptionCaught")
     fun credentials(device: DiscoveredDevice, session: SmartHomeSession? = null): DeviceCredentials {
         if (device.version < 3) return checked(DeviceCredentials(device))
-        requireNotNull(session) { "A version-3 device needs a session from SmartHomeCloud.login()" }
+        if (session == null) throw AccountRequiredException()
         var cloudError: Exception? = null
         var checkError: Exception? = null
         for (bigEndian in listOf(false, true)) {
@@ -98,4 +145,8 @@ object Setup {
         MideaClient(credentials).use { it.refresh() }
         return credentials
     }
+}
+
+private fun summary(failures: List<SetupFailure>): String = failures.joinToString("; ") { (device, error) ->
+    "${device.name} (v${device.version}): ${error.message ?: error.javaClass.simpleName}"
 }
