@@ -17,12 +17,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * val credentials = Setup.run("you@example.com", "password").first()
  * MideaClient(credentials).use { client ->
  *     val state = client.refresh()
- *     println("${state.targetTemperature}°C ${OperationalMode.fromRaw(state.mode)}")
+ *     println("${state.targetTemperature}°C ${state.mode}")
  *
  *     client.update { set ->
  *         set.powerOn = true
  *         set.targetTemperature = 22.0
- *         set.mode = OperationalMode.COOL.raw
+ *         set.mode = OperationalMode.COOL
  *     }
  * }
  * ```
@@ -88,7 +88,7 @@ class MideaClient(
      * client.update { set ->
      *     set.powerOn = true
      *     set.targetTemperature = 21.5
-     *     set.fanSpeed = FanSpeed.AUTO.raw
+     *     set.fanSpeed = FanSpeed.AUTO
      * }
      * ```
      */

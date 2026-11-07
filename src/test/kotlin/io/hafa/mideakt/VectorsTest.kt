@@ -59,10 +59,10 @@ class VectorsTest {
         val state = ACState(
             powerOn = p["power_on"].bool,
             targetTemperature = p["target_temperature"].dbl,
-            mode = p["operational_mode"].num,
-            fanSpeed = p["fan_speed"].num,
+            mode = OperationalMode(p["operational_mode"].num),
+            fanSpeed = FanSpeed(p["fan_speed"].num),
             indoorTemperature = null, outdoorTemperature = null,
-            swingMode = p["swing_mode"].num,
+            swingMode = SwingMode(p["swing_mode"].num),
             eco = p["eco"].bool, turbo = p["turbo"].bool, sleep = p["sleep"].bool,
             fahrenheit = p["fahrenheit"].bool, purifier = p["purifier"].bool,
             displayOn = true, filterAlert = false, freezeProtection = p["freeze_protection"].bool,
@@ -87,8 +87,8 @@ class VectorsTest {
         val state = ACState.parse(response["frame"].str.hexToByteArray())!!
         assertEquals(parsed["power_on"].bool, state.powerOn)
         assertEquals(parsed["target_temperature"].dbl, state.targetTemperature)
-        assertEquals(parsed["operational_mode"].num, state.mode)
-        assertEquals(parsed["fan_speed"].num, state.fanSpeed)
+        assertEquals(OperationalMode(parsed["operational_mode"].num), state.mode)
+        assertEquals(FanSpeed(parsed["fan_speed"].num), state.fanSpeed)
         assertEquals(parsed["indoor_temperature"].dbl, state.indoorTemperature)
         assertEquals(parsed["outdoor_temperature"].dbl, state.outdoorTemperature)
         assertEquals(parsed["display_on"].bool, state.displayOn)

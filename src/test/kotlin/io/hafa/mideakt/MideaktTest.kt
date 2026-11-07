@@ -5,14 +5,15 @@ import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MideaktTest {
     @Test
     fun targetTemperatureClampedOnEncode() {
         fun state(temperature: Double) = SetState(
-            powerOn = true, targetTemperature = temperature, mode = OperationalMode.COOL.raw,
-            fanSpeed = FanSpeed.AUTO.raw, eco = false, swingMode = 0, turbo = false,
+            powerOn = true, targetTemperature = temperature, mode = OperationalMode.COOL,
+            fanSpeed = FanSpeed.AUTO, eco = false, swingMode = SwingMode.OFF, turbo = false,
             sleep = false, fahrenheit = false, purifier = false, targetHumidity = 40,
             freezeProtection = false,
         )
@@ -90,5 +91,17 @@ class MideaktTest {
             connection.disconnect()
             device.join(5_000)
         }
+    }
+
+    /** Values a unit reports without a name are kept, and the named ones print by name. */
+    @Test
+    fun namedValuesKeepUnnamedOnes() {
+        assertEquals("COOL", OperationalMode(2).toString())
+        assertEquals("mode(7)", OperationalMode(7).toString())
+        assertEquals(FanSpeed.AUTO, FanSpeed(102))
+        assertEquals("speed(55)", FanSpeed(55).toString())
+        assertEquals(SwingMode.BOTH, SwingMode.HORIZONTAL + SwingMode.VERTICAL)
+        assertTrue(SwingMode.VERTICAL in SwingMode.BOTH)
+        assertFalse(SwingMode.BOTH in SwingMode.VERTICAL)
     }
 }
