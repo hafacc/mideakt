@@ -23,9 +23,17 @@ object Discovery {
             "007f75bd6b3e4f8b762e849c6e578d6590036e9d4342a50f1f569eb8ec918e92e5"
     private val PORTS = intArrayOf(6445, 20086)
 
-    /** Broadcasts the discovery probe and returns the responding devices, deduplicated by id. */
+    /**
+     * Broadcasts the discovery probe and returns the responding devices, deduplicated by id.
+     *
+     * Some modules ignore broadcasts and answer only a probe sent to their own address, so
+     * [unicastTargets] are probed directly as well (for example every host on the subnet).
+     */
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
-    fun discover(timeoutMs: Int = 4000): List<DiscoveredDevice> {
+    fun discover(
+        timeoutMs: Int = 4000,
+        unicastTargets: Collection<InetAddress> = emptyList(),
+    ): List<DiscoveredDevice> {
         val probe = PROBE_HEX.hexToBytes()
         return DatagramSocket().use { socket ->
             socket.broadcast = true
@@ -33,6 +41,7 @@ object Discovery {
 
             val targets = broadcastAddresses().toMutableSet()
             targets.add(InetAddress.getByName("255.255.255.255"))
+            targets.addAll(unicastTargets)
             for (target in targets) {
                 for (port in PORTS) {
                     try { socket.send(DatagramPacket(probe, probe.size, target, port)) } catch (_: Exception) {}

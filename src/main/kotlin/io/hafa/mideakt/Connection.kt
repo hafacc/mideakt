@@ -7,6 +7,12 @@ import java.net.Socket
 import kotlin.random.Random
 
 /**
+ * Thrown when a version-3 device turns down the token, or answers with a reply the key
+ * can't verify: the token/key pair is wrong for this device, and trying again won't help.
+ */
+class HandshakeRejectedException(message: String) : ProtocolException(message)
+
+/**
  * Blocking TCP transport for the Midea LAN protocol. [version] 3 uses the "8370"
  * framing with the key handshake; version 2 uses the unauthenticated `0x5A5A`
  * framing directly (no handshake). Call from a background thread/coroutine; not
@@ -39,15 +45,21 @@ internal class MideaConnection(
         socket = null; input = null; output = null; localKey = null
     }
 
+    /** Runs the key handshake; throws [HandshakeRejectedException] when the pair is wrong for the device. */
+    @Suppress("ThrowsCount")
     fun authenticate(token: ByteArray, key: ByteArray) {
         writeRaw(encodeHandshake(token))
-        val data = process(readPacket())
+        val packet = readPacket()
+        if (packet.size >= 6 && packet[5].toInt() and 0xF == 0xF) {
+            throw HandshakeRejectedException("device rejected the token")
+        }
+        val data = process(packet)
         if (data.size != 64) throw ProtocolException("invalid handshake length")
         val payload = data.copyOfRange(0, 32)
         val receivedHash = data.copyOfRange(32, 64)
         val decrypted = Crypto.decryptCBC(key, payload)
         if (!Crypto.sha256(decrypted).contentEquals(receivedHash)) {
-            throw ProtocolException("handshake hash mismatch")
+            throw HandshakeRejectedException("handshake reply doesn't verify against the key")
         }
         localKey = Crypto.xor(decrypted, key)
     }

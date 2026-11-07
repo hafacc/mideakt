@@ -1,68 +1,102 @@
 package io.hafa.mideakt
 
-import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URLEncoder
+import java.security.SecureRandom
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 
-/** Thrown when a cloud request fails; [code] is the cloud or HTTP error code, if known. */
-class CloudException(message: String, val code: Int?) : Exception(message)
+/** Thrown when a cloud request fails. */
+open class CloudException(
+    message: String,
+    /** The cloud or HTTP error code, if known. */
+    val code: Int?,
+) : Exception(message)
 
-/** A NetHome Plus region and its shared community account — public throwaway logins, not personal credentials. */
-enum class Region(internal val account: String, internal val password: String) {
-    US("nethome+us@mailinator.com", "password1"),
-    DE("nethome+de@mailinator.com", "password1"),
-    KR("nethome+sea@mailinator.com", "password1"),
-}
+/** Thrown by [SmartHomeCloud.login] when the cloud rejects the account, e.g. a wrong email or password. */
+class CloudLoginException(message: String, code: Int?) : CloudException(message, code)
 
 /**
- * NetHome Plus cloud client — just enough to fetch a device's token/key.
- *
- * Pass your own [account]/[password] for reliability, or use [forRegion] for a
- * region's shared community account (convenient and registration-free, but shared
- * — prone to rate-limiting and token churn).
- *
- * [baseUrl], [appId], and [appKey] identify the NetHome Plus app to Midea's cloud:
- * fixed public constants, the same for every user, not personal credentials. They
- * default to the correct values and are overridable only to impersonate a
- * different Midea app.
+ * Thrown by [Setup.credentials] when the device isn't registered to the
+ * signed-in account (cloud code [CODE]); log in with the device owner's account.
  */
-class NetHomePlusCloud(
-    private val account: String,
-    private val password: String,
-    private val baseUrl: String = DEFAULT_BASE_URL,
-    private val appId: String = DEFAULT_APP_ID,
-    private val appKey: String = DEFAULT_APP_KEY,
-) {
-    private val deviceId = (0 until 8).joinToString("") { "%02x".format((0..255).random()) }
-    private var sessionId = ""
-    private var loginId: String? = null
+class DeviceNotInAccountException(message: String) : CloudException(message, CODE) {
+    /** Holds the cloud error code. */
+    companion object {
+        /** The cloud's "You have no permissions" code. */
+        const val CODE = 3201
+    }
+}
 
-    /** Authenticates with the cloud, establishing the session that [getToken] needs. */
-    fun login() {
-        if (loginId == null) loginId = getLoginId()
-        val result = apiRequest(
-            "/v1/user/login",
-            mapOf(
-                "loginAccount" to account,
-                "password" to encryptPassword(loginId!!, password),
-            ),
-        )
-        sessionId = result.string("sessionId") ?: throw CloudException("No sessionId", null)
+/** A signed-in SmartHome session, from [SmartHomeCloud.login]; pass it to [Setup.credentials]. */
+class SmartHomeSession internal constructor(internal val cloud: SmartHomeCloud, internal val accessToken: String)
+
+/**
+ * Midea SmartHome cloud client (the MSmartHome app's backend) — just enough to
+ * fetch a device's token/key. Ported from msmart's `SmartHomeCloud`.
+ *
+ * The cloud only issues keys for devices registered to the signed-in account, so
+ * pass the device owner's [account] and [password]. Call [login], then pass its session
+ * to [Setup.credentials]; one session can serve many devices, from any thread.
+ */
+class SmartHomeCloud(private val account: String, private val password: String) {
+    private val deviceId = randomHex(8)
+
+    /**
+     * Signs in and returns the session [Setup.credentials] needs. Throws [CloudLoginException] if the
+     * cloud rejects the account.
+     */
+    fun login(): SmartHomeSession {
+        val loginId = apiRequest(
+            "/v1/user/login/id/get", baseBody(mapOf("loginAccount" to account)), cloudError = ::CloudLoginException,
+        ).string("loginId") ?: throw CloudException("No loginId", null)
+
+        val body = buildJsonObject {
+            putJsonObject("data") {
+                put("platform", 2)
+                put("deviceId", deviceId)
+            }
+            putJsonObject("iotData") {
+                put("appId", APP_ID)
+                put("src", APP_ID)
+                put("clientType", 1)
+                put("loginAccount", account)
+                put("iampwd", iamPassword(loginId, password))
+                put("password", encryptPassword(loginId, password))
+                put("pushToken", randomHex(90))
+                put("stamp", timestamp())
+                put("reqId", randomHex(16))
+            }
+        }
+        val result = apiRequest("/mj/user/login", body, cloudError = ::CloudLoginException)
+        val accessToken = (result["mdata"] as? JsonObject)?.string("accessToken")
+            ?: throw CloudException("No accessToken", null)
+        return SmartHomeSession(this, accessToken)
     }
 
-    /** Fetches the local token/key pair for the device identified by [udpid]. */
-    fun getToken(udpid: String): Pair<String, String> {
-        val result = apiRequest("/v1/iot/secure/getToken", mapOf("udpid" to udpid))
+    /** Fetches the token/key pair, as hex, the cloud files under one byte order of [deviceId]. */
+    internal fun getToken(session: SmartHomeSession, deviceId: Long, bigEndian: Boolean): Pair<String, String> {
+        val udpid = UDPID.compute(deviceId, bigEndian)
+        val result = apiRequest(
+            "/v1/iot/secure/getToken",
+            baseBody(mapOf("udpid" to udpid, "applianceCodes" to deviceId.toString())),
+            session.accessToken,
+        ) { message, code ->
+            if (code == DeviceNotInAccountException.CODE) DeviceNotInAccountException(message)
+            else CloudException(message, code)
+        }
         val list = result["tokenlist"] as? JsonArray ?: throw CloudException("No tokenlist", null)
         for (entry in list) {
             val entryObject = entry as? JsonObject ?: continue
@@ -75,23 +109,40 @@ class NetHomePlusCloud(
         throw CloudException("No token/key for udpid $udpid", null)
     }
 
-    private fun getLoginId(): String {
-        val result = apiRequest("/v1/user/login/id/get", mapOf("loginAccount" to account))
-        return result.string("loginId") ?: throw CloudException("No loginId", null)
+    private fun baseBody(data: Map<String, String>): JsonObject = buildJsonObject {
+        put("appId", APP_ID)
+        put("src", APP_ID)
+        put("format", 2)
+        put("clientType", 1)
+        put("language", "en_US")
+        put("deviceId", deviceId)
+        put("stamp", timestamp())
+        put("reqId", randomHex(16))
+        data.forEach { (key, value) -> put(key, value) }
     }
 
-    private fun apiRequest(endpoint: String, data: Map<String, String>): JsonObject {
-        val body = baseBody().toMutableMap()
-        body.putAll(data)
-        body["sign"] = sign(endpoint, body)
+    /** Posts [body] to [endpoint]; a cloud-reported error is thrown as [cloudError]'s result. */
+    private fun apiRequest(
+        endpoint: String,
+        body: JsonObject,
+        accessToken: String = "",
+        cloudError: (String, Int?) -> CloudException = ::CloudException,
+    ): JsonObject {
+        val contents = body.toString()
+        val random = randomHex(16)
 
-        val connection = URI(baseUrl + endpoint).toURL().openConnection() as HttpURLConnection
+        val connection = URI("$BASE_URL/mas/v5/app/proxy?alias=$endpoint").toURL()
+            .openConnection() as HttpURLConnection
         connection.requestMethod = "POST"
         connection.doOutput = true
         connection.connectTimeout = 10000
         connection.readTimeout = 10000
-        connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-        OutputStreamWriter(connection.outputStream).use { it.write(formEncode(body)) }
+        connection.setRequestProperty("Content-Type", "application/json")
+        connection.setRequestProperty("secretVersion", "1")
+        connection.setRequestProperty("sign", sign(contents, random))
+        connection.setRequestProperty("random", random)
+        connection.setRequestProperty("accessToken", accessToken)
+        connection.outputStream.use { it.write(contents.toByteArray(Charsets.UTF_8)) }
 
         // On an HTTP error `inputStream` throws and the response body is on `errorStream`.
         val status = connection.responseCode
@@ -101,72 +152,53 @@ class NetHomePlusCloud(
         val parsed = if (text.isNotBlank()) runCatching { Json.parseToJsonElement(text) }.getOrNull() else null
         val json = parsed as? JsonObject
             ?: throw CloudException("HTTP $status from cloud: ${text.take(200).ifBlank { "empty body" }}", status)
-        val code = json.string("errorCode")?.toIntOrNull()
-        if (code == 0) return json["result"] as? JsonObject ?: JsonObject(emptyMap())
-        throw CloudException(json.string("msg") ?: "Unknown cloud error", code)
+        // `code` arrives as a number or a string.
+        val code = json.string("code")?.toIntOrNull()
+        if (code == 0) return json["data"] as? JsonObject ?: JsonObject(emptyMap())
+        throw cloudError(json.string("msg") ?: "Unknown cloud error", code)
     }
 
-    private fun baseBody(): Map<String, String> = mapOf(
-        "appId" to appId,
-        "src" to appId,
-        "format" to "2",
-        "clientType" to "1",
-        "language" to "en_US",
-        "deviceId" to deviceId,
-        "stamp" to timestamp(),
-        "sessionId" to sessionId,
-    )
+    internal companion object {
+        // Public MSmartHome app identity, shared by every Midea LAN implementation.
+        const val BASE_URL = "https://mp-prod.appsmb.com"
+        const val APP_ID = "1010"
+        const val HMAC_KEY = "PROD_VnoClJI9aikS8dyy"
+        const val IOT_KEY = "meicloud"
+        const val LOGIN_KEY = "ac21b9f9cbfe4ca5a88562ef25e2b768"
 
-    private fun timestamp(): String {
-        val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
-        formatter.timeZone = TimeZone.getTimeZone("UTC")
-        return formatter.format(Date())
-    }
+        private val secureRandom = SecureRandom()
 
-    private fun sign(path: String, body: Map<String, String>): String {
-        val query = body.toSortedMap().entries.joinToString("&") { "${it.key}=${it.value}" }
-        return Crypto.sha256((path + query + appKey).toByteArray(Charsets.US_ASCII)).toHex()
-    }
-
-    private fun encryptPassword(loginId: String, password: String): String {
-        val passwordHash = Crypto.sha256(password.toByteArray(Charsets.US_ASCII)).toHex()
-        return Crypto.sha256((loginId + passwordHash + appKey).toByteArray(Charsets.US_ASCII)).toHex()
-    }
-
-    private fun formEncode(body: Map<String, String>): String =
-        body.entries.joinToString("&") {
-            "${URLEncoder.encode(it.key, "UTF-8")}=${URLEncoder.encode(it.value, "UTF-8")}"
+        fun sign(body: String, random: String): String {
+            val mac = Mac.getInstance("HmacSHA256")
+            mac.init(SecretKeySpec(HMAC_KEY.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+            return mac.doFinal((IOT_KEY + body + random).toByteArray(Charsets.UTF_8)).toHex()
         }
 
-    companion object {
-        // Public NetHome Plus app identity, shared by every Midea LAN implementation.
-        const val DEFAULT_BASE_URL = "https://mapp.appsmb.com"
-        const val DEFAULT_APP_ID = "1017"
-        const val DEFAULT_APP_KEY = "3742e9e5842d4ad59c2db887e12449f9"
+        fun encryptPassword(loginId: String, password: String): String =
+            sha256Hex(loginId + sha256Hex(password) + LOGIN_KEY)
 
-        /**
-         * A client backed by a [Region]'s shared community account — convenient
-         * and registration-free, but shared (rate-limiting and token churn), so
-         * prefer the constructor with your own account. Optionally override the
-         * app identity ([baseUrl]/[appId]/[appKey]).
-         */
-        fun forRegion(
-            region: Region = Region.US,
-            baseUrl: String = DEFAULT_BASE_URL,
-            appId: String = DEFAULT_APP_ID,
-            appKey: String = DEFAULT_APP_KEY,
-        ): NetHomePlusCloud = NetHomePlusCloud(region.account, region.password, baseUrl, appId, appKey)
+        fun iamPassword(loginId: String, password: String): String =
+            sha256Hex(loginId + md5Hex(md5Hex(password)) + LOGIN_KEY)
+
+        private fun sha256Hex(text: String): String = Crypto.sha256(text.toByteArray(Charsets.UTF_8)).toHex()
+
+        private fun md5Hex(text: String): String = Crypto.md5(text.toByteArray(Charsets.UTF_8)).toHex()
+
+        private fun randomHex(byteCount: Int): String = ByteArray(byteCount).also(secureRandom::nextBytes).toHex()
+
+        private fun timestamp(): String {
+            val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
+            formatter.timeZone = TimeZone.getTimeZone("UTC")
+            return formatter.format(Date())
+        }
     }
 }
 
 private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
 
 /** Computes the udpid the cloud uses to look up a device's token/key. */
-object UDPID {
-    /**
-     * The udpid for [deviceId]. The cloud may key on either byte order, so a
-     * manual flow should try [bigEndian] = false then true (as [Setup] does).
-     */
+internal object UDPID {
+    /** The udpid for [deviceId], from its six bytes in little- or [bigEndian] order. */
     fun compute(deviceId: Long, bigEndian: Boolean): String {
         val bytes = ByteArray(6)
         var value = deviceId
