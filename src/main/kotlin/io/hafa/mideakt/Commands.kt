@@ -4,9 +4,28 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.floor
 
 /** AC operating modes. [raw] is the byte exchanged with the device; map one back with [fromRaw]. */
-enum class OperationalMode(val raw: Int) {
-    AUTO(1), COOL(2), DRY(3),
-    HEAT(4), FAN_ONLY(5), SMART_DRY(6);
+enum class OperationalMode(
+    /** The on-wire value. */
+    val raw: Int,
+) {
+    /** Picks heating or cooling to reach the target. */
+    AUTO(1),
+
+    /** Cools. */
+    COOL(2),
+
+    /** Dehumidifies. */
+    DRY(3),
+
+    /** Heats. */
+    HEAT(4),
+
+    /** Runs the fan only. */
+    FAN_ONLY(5),
+
+    /** Dehumidifies toward the target humidity. */
+    SMART_DRY(6),
+    ;
 
     companion object {
         /** The mode with this on-wire [raw] value, or null if none matches. */
@@ -15,9 +34,28 @@ enum class OperationalMode(val raw: Int) {
 }
 
 /** Fan speeds. [raw] is the byte exchanged with the device; map one back with [fromRaw]. */
-enum class FanSpeed(val raw: Int) {
-    SILENT(20), LOW(40), MEDIUM(60),
-    HIGH(80), AUTO(102), MAX(100);
+enum class FanSpeed(
+    /** The on-wire value. */
+    val raw: Int,
+) {
+    /** Quietest speed. */
+    SILENT(20),
+
+    /** Low speed. */
+    LOW(40),
+
+    /** Medium speed. */
+    MEDIUM(60),
+
+    /** High speed. */
+    HIGH(80),
+
+    /** Speed chosen by the unit. */
+    AUTO(102),
+
+    /** Fastest speed. */
+    MAX(100),
+    ;
 
     companion object {
         /** The fan speed with this on-wire [raw] value, or null if none matches. */
