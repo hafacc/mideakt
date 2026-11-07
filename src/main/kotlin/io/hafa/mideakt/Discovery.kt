@@ -8,11 +8,17 @@ import java.net.SocketTimeoutException
 
 /** A device found on the LAN, with the addressing and protocol version needed to connect. */
 data class DiscoveredDevice(
+    /** The device id (≤ 2^48), used to address and authenticate it. */
     val id: Long,
+    /** The address the reply came from. */
     val ip: String,
+    /** The device's TCP control port. */
     val port: Int,
+    /** The protocol version: 3 for the token/key handshake, 2 for none. */
     val version: Int,
+    /** The device's user-assigned name. */
     val name: String,
+    /** The serial number, or null if the device reported none. */
     val serialNumber: String?,
 )
 

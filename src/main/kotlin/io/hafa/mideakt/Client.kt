@@ -207,6 +207,7 @@ class MideaClient(
     override fun close() = disconnect()
 
     companion object {
+        /** The connect and read timeout used unless one is given, in milliseconds. */
         const val DEFAULT_TIMEOUT_MS = 6000
     }
 }
