@@ -211,6 +211,7 @@ class MideaClient(
     /** Releases the persistent connection; [AutoCloseable] so callers can `use { }`. */
     override fun close() = disconnect()
 
+    /** Holds the default timeout. */
     companion object {
         /** The connect and read timeout used unless one is given, in milliseconds. */
         const val DEFAULT_TIMEOUT_MS = 6000

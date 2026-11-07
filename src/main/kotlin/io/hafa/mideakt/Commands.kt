@@ -287,10 +287,10 @@ data class ACState(
     /** Target relative humidity in percent, or null if the unit doesn't support it. */
     val targetHumidity: Int?,
 ) {
-    companion object {
+    internal companion object {
         /** Parse a 0xAA frame into state; null if it's not a 0xC0 state response. */
         @Suppress("ReturnCount", "ThrowsCount")
-        internal fun parse(frame: ByteArray): ACState? {
+        fun parse(frame: ByteArray): ACState? {
             if (frame.size < Frame.HEADER_LENGTH + 2) throw ProtocolException("frame too short")
             if (frame[0].toInt() and 0xFF != 0xAA || frame[2].toInt() and 0xFF != Frame.DEVICE_TYPE_AC) {
                 throw ProtocolException("bad frame")

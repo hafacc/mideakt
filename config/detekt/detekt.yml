@@ -5,18 +5,18 @@ build:
   maxIssues: 0
 
 comments:
-  # Gate the public API on documentation (all off by default). Skip nested
-  # classes/objects so companions aren't required to carry their own KDoc.
+  # Gate the public API on documentation (all off by default), including nested
+  # classes and companion objects.
   UndocumentedPublicClass:
     active: true
-    searchInNestedClass: false
-    searchInInnerClass: false
-    searchInInnerObject: false
+    searchInNestedClass: true
+    searchInInnerClass: true
+    searchInInnerObject: true
   UndocumentedPublicFunction:
     active: true
   UndocumentedPublicProperty:
     active: true
-    searchProtectedProperty: false
+    searchProtectedProperty: true
 
 naming:
   # Files are named by concept (Client, Cloud, Protocol, ...), not after a single
