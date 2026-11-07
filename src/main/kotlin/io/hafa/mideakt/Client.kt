@@ -3,6 +3,7 @@ package io.hafa.mideakt
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.net.SocketFactory
 
 /**
  * High-level local control of one air conditioner over a persistent
@@ -12,6 +13,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Construct it from the [DeviceCredentials] that [Setup] returns, then reuse the
  * instance. It is [AutoCloseable], so prefer `use { }`. Protocol V3 uses a token/key
  * handshake; version-2 devices use an unauthenticated `0x5A5A` transport with no handshake.
+ *
+ * Pass a [SocketFactory] to choose the network the device connection uses, such as an
+ * Android `Network.socketFactory` for Wi-Fi.
  *
  * ```kotlin
  * val credentials = Setup.run("you@example.com", "password").first()
@@ -32,6 +36,7 @@ class MideaClient(
     credentials: DeviceCredentials,
     private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
+    private val socketFactory: SocketFactory = SocketFactory.getDefault(),
 ) : AutoCloseable {
     private val host = credentials.ip
     private val port = credentials.port
@@ -104,7 +109,7 @@ class MideaClient(
     private fun ensureConnected() {
         if (connection != null && System.currentTimeMillis() - authenticatedAt < sessionLifetimeMs) return
         disconnect()
-        val fresh = MideaConnection(host, port, deviceId, version)
+        val fresh = MideaConnection(host, port, deviceId, version, socketFactory)
         try {
             fresh.connect(connectTimeoutMs, readTimeoutMs)
             if (version >= 3) {

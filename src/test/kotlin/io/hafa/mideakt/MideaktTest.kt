@@ -9,6 +9,15 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MideaktTest {
+    /** Discovery hands its socket to the caller before sending any probe. */
+    @Test
+    fun discoverBindsSocketBeforeProbing() {
+        val error = assertFailsWith<IllegalStateException> {
+            Discovery.discover(timeoutMs = 0) { error("bound") }
+        }
+        assertEquals("bound", error.message)
+    }
+
     @Test
     fun targetTemperatureClampedOnEncode() {
         fun state(temperature: Double) = SetState(
