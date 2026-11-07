@@ -38,12 +38,3 @@ internal object Crypto {
         return cipher.doFinal(data)
     }
 }
-
-internal fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
-
-internal fun String.hexToBytes(): ByteArray {
-    val clean = trim()
-    return ByteArray(clean.length / 2) {
-        clean.substring(it * 2, it * 2 + 2).toInt(16).toByte()
-    }
-}

@@ -171,7 +171,7 @@ class SmartHomeCloud(private val account: String, private val password: String) 
         fun sign(body: String, random: String): String {
             val mac = Mac.getInstance("HmacSHA256")
             mac.init(SecretKeySpec(HMAC_KEY.toByteArray(Charsets.UTF_8), "HmacSHA256"))
-            return mac.doFinal((IOT_KEY + body + random).toByteArray(Charsets.UTF_8)).toHex()
+            return mac.doFinal((IOT_KEY + body + random).toByteArray(Charsets.UTF_8)).toHexString()
         }
 
         fun encryptPassword(loginId: String, password: String): String =
@@ -180,11 +180,11 @@ class SmartHomeCloud(private val account: String, private val password: String) 
         fun iamPassword(loginId: String, password: String): String =
             sha256Hex(loginId + md5Hex(md5Hex(password)) + LOGIN_KEY)
 
-        private fun sha256Hex(text: String): String = Crypto.sha256(text.toByteArray(Charsets.UTF_8)).toHex()
+        private fun sha256Hex(text: String): String = Crypto.sha256(text.toByteArray(Charsets.UTF_8)).toHexString()
 
-        private fun md5Hex(text: String): String = Crypto.md5(text.toByteArray(Charsets.UTF_8)).toHex()
+        private fun md5Hex(text: String): String = Crypto.md5(text.toByteArray(Charsets.UTF_8)).toHexString()
 
-        private fun randomHex(byteCount: Int): String = ByteArray(byteCount).also(secureRandom::nextBytes).toHex()
+        private fun randomHex(byteCount: Int): String = ByteArray(byteCount).also(secureRandom::nextBytes).toHexString()
 
         private fun timestamp(): String {
             val formatter = SimpleDateFormat("yyyyMMddHHmmss", Locale.US)
@@ -208,6 +208,6 @@ internal object UDPID {
         }
         if (bigEndian) bytes.reverse()
         val hash = Crypto.sha256(bytes)
-        return ByteArray(16) { (hash[it].toInt() xor hash[it + 16].toInt()).toByte() }.toHex()
+        return ByteArray(16) { (hash[it].toInt() xor hash[it + 16].toInt()).toByte() }.toHexString()
     }
 }

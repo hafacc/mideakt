@@ -33,23 +33,23 @@ class VectorsTest {
 
     @Test
     fun encKey() {
-        assertEquals(vectors["enc_key"].str, Security.ENC_KEY.toHex())
+        assertEquals(vectors["enc_key"].str, Security.ENC_KEY.toHexString())
     }
 
     @Test
     fun crc8() {
         val crc = vectors["crc8"]
-        assertEquals(crc["expected"].num, CRC8.calculate(crc["input"].str.hexToBytes()))
+        assertEquals(crc["expected"].num, CRC8.calculate(crc["input"].str.hexToByteArray()))
     }
 
     @Test
     fun getStateFrame() {
-        assertEquals(body(vectors["get_state_frame"].str.hexToBytes()), body(Command.getState()))
+        assertEquals(body(vectors["get_state_frame"].str.hexToByteArray()), body(Command.getState()))
     }
 
     @Test
     fun toggleDisplayFrame() {
-        assertEquals(body(vectors["toggle_display_frame"].str.hexToBytes()), body(Command.toggleDisplay()))
+        assertEquals(body(vectors["toggle_display_frame"].str.hexToByteArray()), body(Command.toggleDisplay()))
     }
 
     @Test
@@ -69,7 +69,7 @@ class VectorsTest {
             targetHumidity = p["target_humidity"].num,
         )
         val command = SetState(state).apply { beep = p["beep"].bool }
-        assertEquals(body(setState["frame"].str.hexToBytes()), body(command.encode()))
+        assertEquals(body(setState["frame"].str.hexToByteArray()), body(command.encode()))
     }
 
     @Test
@@ -84,7 +84,7 @@ class VectorsTest {
     fun stateResponse() {
         val response = vectors["state_response"]
         val parsed = response["parsed"]
-        val state = ACState.parse(response["frame"].str.hexToBytes())!!
+        val state = ACState.parse(response["frame"].str.hexToByteArray())!!
         assertEquals(parsed["power_on"].bool, state.powerOn)
         assertEquals(parsed["target_temperature"].dbl, state.targetTemperature)
         assertEquals(parsed["operational_mode"].num, state.mode)
