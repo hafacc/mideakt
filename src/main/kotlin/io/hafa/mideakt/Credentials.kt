@@ -2,8 +2,8 @@ package io.hafa.mideakt
 
 /**
  * Addressing plus the authentication secrets for one device — everything [MideaClient]
- * needs to connect. Normally obtained from [Setup]; construct it directly only when
- * driving setup yourself (see the README's manual-setup example).
+ * needs to connect. Normally obtained from [Setup]; build it from a [DiscoveredDevice]
+ * when fetching the key yourself.
  */
 data class DeviceCredentials(
     /** The device's user-assigned name, from discovery. */
@@ -22,4 +22,9 @@ data class DeviceCredentials(
     val key: String,
     /** The device's serial number, from discovery; null if the device reported none. */
     val serialNumber: String?,
-)
+) {
+    /** Credentials for a [device] found by [Discovery], with its [token] and [key] as hex. */
+    constructor(device: DiscoveredDevice, token: String = "", key: String = "") : this(
+        device.name, device.id, device.ip, device.port, device.version, token, key, device.serialNumber,
+    )
+}

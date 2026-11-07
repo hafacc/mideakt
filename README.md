@@ -14,8 +14,10 @@ parse the cloud's JSON.
 
 ## Features
 
-- **Discovery** of devices on the LAN (UDP broadcast).
-- **Cloud key fetch** (NetHome Plus) to obtain a device's token/key once.
+- **Discovery** of devices on the LAN (UDP broadcast, plus probes to given addresses for modules that ignore broadcasts).
+- **Cloud key fetch** (Midea's SmartHome cloud, the MSmartHome app's backend)
+  to obtain a device's token/key once, with the account the device is
+  registered to.
 - **Setup**: discover → fetch key → verify → credentials.
 - **Local control**: power, mode, temperature, fan, eco/turbo/swing, display
   toggle; reads full state. Persistent connection.
@@ -36,7 +38,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.hafacc:mideakt:0.1.0")
+    implementation("com.github.hafacc:mideakt:0.2.0")
 }
 ```
 
@@ -54,7 +56,7 @@ dependencies {
 <dependency>
   <groupId>com.github.hafacc</groupId>
   <artifactId>mideakt</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 </details>
@@ -62,11 +64,9 @@ dependencies {
 ## Usage
 
 ```kotlin
-// One-time setup (touches the cloud once). Uses a shared community account for
-// the region by default; pass your own NetHome Plus account for reliability:
-val credentials = Setup.run().first()                       // Region.US default
-// val credentials = Setup.run(Region.DE).first()           // another region
-// val credentials = Setup.run("you@example.com", "pw").first()  // your account
+// One-time setup (touches the cloud once), with the Midea (MSmartHome) account
+// the devices are registered to — the cloud only issues keys for its own devices:
+val credentials = Setup.run("you@example.com", "pw").first()
 
 // All local from here — store the credentials and reuse:
 val client = MideaClient(credentials)
@@ -82,28 +82,26 @@ client.update { set ->
 
 ### Manual setup
 
-`Setup.run` is the high-level path. The same steps are exposed individually if you
-want to drive setup yourself — discover, fetch the key from the cloud, then connect:
+`Setup.run` is the high-level path. To find devices that ignore broadcasts, discover
+them yourself and pass them in:
 
 ```kotlin
-val cloud = NetHomePlusCloud("you@example.com", "pw")  // or NetHomePlusCloud.forRegion()
-cloud.login()
+val devices = Discovery.discover(unicastTargets = subnetHosts)
+val credentials = Setup.run("you@example.com", "pw", devices)
+```
 
+The same steps are exposed individually if you want to drive setup yourself —
+discover, fetch the key from the cloud, then connect:
+
+```kotlin
+val cloud = SmartHomeCloud("you@example.com", "pw")    // the device owner's account
+val session = cloud.login()                            // CloudLoginException on a bad login
 val device = Discovery.discover().first()              // a DiscoveredDevice on the LAN
 
-// The cloud keys the token on the udpid; the byte order isn't discoverable, so try
-// both and use whichever the cloud answers (see "Design notes").
-val (token, key) = listOf(false, true).firstNotNullOf { bigEndian ->
-    runCatching { cloud.getToken(UDPID.compute(device.id, bigEndian)) }.getOrNull()
-}
-
-val client = MideaClient(
-    DeviceCredentials(
-        device.name, device.id, device.ip, device.port, device.version,
-        token, key, device.serialNumber,
-    ),
-)
-println(OperationalMode.fromRaw(client.refresh().mode))
+// Fetches the device's key and returns the pair the device accepts; throws
+// DeviceNotInAccountException for a device that isn't registered to this account.
+val credentials = Setup.credentials(device, session)
+println(OperationalMode.fromRaw(MideaClient(credentials).refresh().mode))
 ```
 
 ## Android
@@ -147,9 +145,8 @@ The official app computed that udpid using a particular byte order of the id whe
 it registered the device, and that order varies across firmware/app versions.
 Nothing in the device's discovery reply or the cloud API reports which order was
 used, so it can't be computed or detected locally — the only signal is the cloud
-itself. So setup computes both candidates and calls `getToken` for each; whichever
-returns a token is correct. Hence `Setup` (and the manual example) try
-little-endian, then big-endian.
+itself, and it may answer for both with different pairs. So `Setup.credentials`
+fetches the pair under each order and keeps the one the device itself accepts.
 
 ### Device ids and JSON
 

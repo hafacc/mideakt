@@ -1,7 +1,10 @@
 package io.hafa.mideakt
 
+import java.net.ServerSocket
+import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class MideaktTest {
@@ -42,5 +45,50 @@ class MideaktTest {
         val command = Command.getState()
         val packet = V2Packet.encode(1108152157446L, command)
         assertTrue(V2Packet.decode(packet).contentEquals(command))
+    }
+
+    // Reference vectors computed from msmart's SmartHomeCloud formulas.
+    @Test
+    fun smartHomeSign() {
+        assertEquals(
+            "a7000535dd05fe33660ff3b19774af222021ce0e99a2e65ba3a1055e5981aa48",
+            SmartHomeCloud.sign(
+                """{"appId":"1010","loginAccount":"user@example.com"}""",
+                "00112233445566778899aabbccddeeff",
+            ),
+        )
+    }
+
+    @Test
+    fun smartHomePasswords() {
+        assertEquals(
+            "29bed488e8211e2d8524b272f0406fbae0e04a25ba1d75e91dd47b7f542aa781",
+            SmartHomeCloud.encryptPassword("d1c6a1c0c7b2d4f6", "hunter2"),
+        )
+        assertEquals(
+            "061ef8c952d6792901cfc5d11d49f512c71543392f824d8b229108b8b403fd37",
+            SmartHomeCloud.iamPassword("d1c6a1c0c7b2d4f6", "hunter2"),
+        )
+    }
+
+    /** A device that answers the handshake with an error packet has turned the token down. */
+    @Test
+    fun handshakeErrorPacketIsRejection() {
+        ServerSocket(0).use { server ->
+            val device = thread {
+                server.accept().use { socket ->
+                    socket.getInputStream().read(ByteArray(256))
+                    socket.getOutputStream().write(
+                        byteArrayOf(0x83.toByte(), 0x70, 0x00, 0x02, 0x20, 0x0F, 0x00, 0x00, 0x00, 0x00),
+                    )
+                    runCatching { socket.getInputStream().read() }
+                }
+            }
+            val connection = MideaConnection("127.0.0.1", server.localPort, 1, 3)
+            connection.connect()
+            assertFailsWith<HandshakeRejectedException> { connection.authenticate(ByteArray(64), ByteArray(32)) }
+            connection.disconnect()
+            device.join(5_000)
+        }
     }
 }
