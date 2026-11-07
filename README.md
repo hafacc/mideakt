@@ -71,12 +71,12 @@ val credentials = Setup.run("you@example.com", "pw").first()
 // All local from here — store the credentials and reuse:
 val client = MideaClient(credentials)
 val state = client.refresh()
-println("${state.targetTemperature} ${OperationalMode.fromRaw(state.mode)}")
+println("${state.targetTemperature} ${state.mode}")  // e.g. 22.0 COOL
 
 client.update { set ->
     set.powerOn = true
     set.targetTemperature = 22.0
-    set.mode = OperationalMode.COOL.raw
+    set.mode = OperationalMode.COOL
 }
 ```
 
@@ -101,7 +101,7 @@ val device = Discovery.discover().first()              // a DiscoveredDevice on 
 // Fetches the device's key and returns the pair the device accepts; throws
 // DeviceNotInAccountException for a device that isn't registered to this account.
 val credentials = Setup.credentials(device, session)
-println(OperationalMode.fromRaw(MideaClient(credentials).refresh().mode))
+println(MideaClient(credentials).refresh().mode)
 ```
 
 ## Android
