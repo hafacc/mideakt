@@ -27,26 +27,18 @@ import java.util.concurrent.atomic.AtomicBoolean
  * }
  * ```
  */
-@Suppress("LongParameterList", "TooGenericExceptionCaught")
-class MideaClient internal constructor(
-    private val host: String,
-    private val port: Int,
-    private val deviceId: Long,
-    private val version: Int,
-    private val token: ByteArray,
-    private val key: ByteArray,
+@Suppress("TooGenericExceptionCaught")
+class MideaClient(
+    credentials: DeviceCredentials,
     private val connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
     private val readTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
 ) : AutoCloseable {
-    constructor(
-        credentials: DeviceCredentials,
-        connectTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
-        readTimeoutMs: Int = DEFAULT_TIMEOUT_MS,
-    ) : this(
-        credentials.ip, credentials.port, credentials.id, credentials.version,
-        credentials.token.hexToBytes(), credentials.key.hexToBytes(),
-        connectTimeoutMs, readTimeoutMs,
-    )
+    private val host = credentials.ip
+    private val port = credentials.port
+    private val deviceId = credentials.id
+    private val version = credentials.version
+    private val token = credentials.token.hexToByteArray()
+    private val key = credentials.key.hexToByteArray()
 
     private var connection: MideaConnection? = null
     private var authenticatedAt = 0L

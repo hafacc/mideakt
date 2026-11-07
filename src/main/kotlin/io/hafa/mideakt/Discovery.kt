@@ -34,7 +34,7 @@ object Discovery {
         timeoutMs: Int = 4000,
         unicastTargets: Collection<InetAddress> = emptyList(),
     ): List<DiscoveredDevice> {
-        val probe = PROBE_HEX.hexToBytes()
+        val probe = PROBE_HEX.hexToByteArray()
         return DatagramSocket().use { socket ->
             socket.broadcast = true
             socket.soTimeout = 300

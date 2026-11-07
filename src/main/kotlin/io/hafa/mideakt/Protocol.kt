@@ -77,7 +77,7 @@ internal object Frame {
 
 internal object Security {
     val SIGN_KEY = "xhdiwjnchekd4d512chdjx5d8e4c394D2D7S".toByteArray(Charsets.US_ASCII)
-    val ENC_KEY: ByteArray get() = Crypto.md5(SIGN_KEY)
+    val ENC_KEY: ByteArray = Crypto.md5(SIGN_KEY)
 
     fun sign(data: ByteArray): ByteArray = Crypto.md5(data + SIGN_KEY)
 }
