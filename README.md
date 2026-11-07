@@ -38,7 +38,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.hafacc:mideakt:0.2.0")
+    implementation("com.github.hafacc:mideakt:latest.release")
 }
 ```
 
@@ -56,7 +56,7 @@ dependencies {
 <dependency>
   <groupId>com.github.hafacc</groupId>
   <artifactId>mideakt</artifactId>
-  <version>0.2.0</version>
+  <version>RELEASE</version>
 </dependency>
 ```
 </details>
