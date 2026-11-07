@@ -4,7 +4,7 @@ import java.time.ZoneOffset
 import java.time.ZonedDateTime
 
 /** Thrown when a frame or packet is malformed, fails its integrity check, or can't be parsed. */
-class ProtocolException(message: String) : Exception(message)
+open class ProtocolException(message: String) : Exception(message)
 
 internal object CRC8 {
     private val TABLE = intArrayOf(

@@ -11,38 +11,33 @@ class SetupException(message: String) : Exception(message)
  * Version-2 devices need no cloud token; they are verified with a local query and
  * only returned if they respond.
  *
- * Defaults to a region's shared NetHome Plus community account; pass your own
- * account credentials for reliability.
+ * Takes the Midea (MSmartHome) account the devices are registered to: the cloud
+ * only issues keys for the signed-in account's own devices.
  *
  * ```kotlin
- * // A region's shared community account:
- * val credentials = Setup.run().first()
- * // Or your own NetHome Plus account:
  * val credentials = Setup.run("you@example.com", "password").first()
  * ```
  *
  * Store the returned [DeviceCredentials] and hand them to [MideaClient]; setup only
- * needs to run again if a device is re-provisioned.
+ * needs to run again if a device is re-provisioned. To find devices that ignore
+ * broadcasts, or over a particular network, run [Discovery.discover] yourself and pass
+ * its result as `devices`.
  */
 object Setup {
-    /** Runs setup using a region's shared community account; see [Setup]. */
-    fun run(region: Region = Region.US): List<DeviceCredentials> =
-        run(NetHomePlusCloud.forRegion(region))
+    /** Runs setup on [devices] with their owner's [account]; see [Setup]. */
+    fun run(
+        account: String,
+        password: String,
+        devices: List<DiscoveredDevice> = Discovery.discover(),
+    ): List<DeviceCredentials> = run(SmartHomeCloud(account, password), devices)
 
-    /** Runs setup using your own NetHome Plus account; see [Setup]. */
-    fun run(account: String, password: String): List<DeviceCredentials> =
-        run(NetHomePlusCloud(account, password))
-
-    /** Runs setup against a pre-configured cloud client (e.g. a custom app id/key); see [Setup]. */
-    fun run(cloud: NetHomePlusCloud): List<DeviceCredentials> {
-        val devices = Discovery.discover()
+    /** Runs setup on [devices] against [cloud], signing in only if one is version 3; see [Setup]. */
+    fun run(cloud: SmartHomeCloud, devices: List<DiscoveredDevice> = Discovery.discover()): List<DeviceCredentials> {
         if (devices.isEmpty()) throw SetupException("No devices found")
 
-        cloud.login()
+        val session = if (devices.any { it.version >= 3 }) cloud.login() else null
 
-        val outcomes = devices.map { device ->
-            device to if (device.version >= 3) provisionV3(cloud, device) else provisionV2(device)
-        }
+        val outcomes = devices.map { device -> device to runCatching { credentials(device, session) } }
         val results = outcomes.mapNotNull { (_, outcome) -> outcome.getOrNull() }
         if (results.isEmpty()) throw provisioningFailure(outcomes)
         return results
@@ -62,43 +57,45 @@ object Setup {
     }
 
     /**
-     * Verifies a version-2 device over its keyless transport, returning credentials
-     * only if it answers a local query. V2 needs no cloud token.
+     * Credentials for one [device], checked by querying the device with them.
+     *
+     * A version-3 device's key comes from the cloud through [session]. The cloud may file it
+     * under either byte order of the device id and answer for both, so this fetches both
+     * pairs and returns the one the device accepts. A version-2 device needs no [session].
+     * Throws the error that best explains a failure: the device refusing a key, then
+     * [DeviceNotInAccountException], then any other cloud error.
      */
-    private fun provisionV2(device: DiscoveredDevice): Result<DeviceCredentials> = runCatching {
-        MideaClient(device.ip, device.port, device.id, device.version, ByteArray(0), ByteArray(0))
-            .use { it.refresh() }
-        DeviceCredentials(
-            device.name, device.id, device.ip, device.port, device.version, "", "", device.serialNumber,
-        )
-    }
-
-    /**
-     * Fetches a version-3 device's token/key from the cloud and verifies it locally. The
-     * udpid byte order isn't discoverable, so it tries little-endian then big-endian and
-     * returns the first pair that authenticates; on failure it carries the last error's cause.
-     */
-    @Suppress("LoopWithTooManyJumpStatements", "TooGenericExceptionCaught")
-    private fun provisionV3(cloud: NetHomePlusCloud, device: DiscoveredDevice): Result<DeviceCredentials> {
-        var lastError: Throwable = SetupException("no token returned for ${device.name}")
+    @Suppress("TooGenericExceptionCaught")
+    fun credentials(device: DiscoveredDevice, session: SmartHomeSession? = null): DeviceCredentials {
+        if (device.version < 3) return checked(DeviceCredentials(device))
+        requireNotNull(session) { "A version-3 device needs a session from SmartHomeCloud.login()" }
+        var cloudError: Exception? = null
+        var checkError: Exception? = null
         for (bigEndian in listOf(false, true)) {
-            val udpid = UDPID.compute(device.id, bigEndian)
-            val pair = try { cloud.getToken(udpid) } catch (e: Exception) { lastError = e; continue }
-            try {
-                MideaClient(
-                    device.ip, device.port, device.id, device.version,
-                    pair.first.hexToBytes(), pair.second.hexToBytes(),
-                ).use { it.refresh() }  // verifies the token/key authenticate
-                return Result.success(
-                    DeviceCredentials(
-                        device.name, device.id, device.ip, device.port, device.version, pair.first, pair.second,
-                        device.serialNumber,
-                    ),
-                )
+            val pair = try {
+                session.cloud.getToken(session, device.id, bigEndian)
+            } catch (e: DeviceNotInAccountException) {
+                // Not being the owner explains a failure better than a missing key does.
+                cloudError = e
+                null
             } catch (e: Exception) {
-                lastError = e
+                if (cloudError == null) cloudError = e
+                null
+            }
+            if (pair != null) {
+                try {
+                    return checked(DeviceCredentials(device, pair.first, pair.second))
+                } catch (e: Exception) {
+                    checkError = e
+                }
             }
         }
-        return Result.failure(lastError)
+        // A key the device turned down says more than a byte order the cloud didn't know.
+        throw checkError ?: cloudError!!
+    }
+
+    private fun checked(credentials: DeviceCredentials): DeviceCredentials {
+        MideaClient(credentials).use { it.refresh() }
+        return credentials
     }
 }

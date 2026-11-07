@@ -10,13 +10,11 @@ import java.util.concurrent.atomic.AtomicBoolean
  * coroutine, and don't interleave calls on one instance (not thread-safe).
  *
  * Construct it from the [DeviceCredentials] that [Setup] returns, then reuse the
- * instance. It is [AutoCloseable], so prefer `use { }`:
- *
- * Protocol V3 uses a token/key handshake; version-2 devices use an unauthenticated
- * `0x5A5A` transport with no handshake.
+ * instance. It is [AutoCloseable], so prefer `use { }`. Protocol V3 uses a token/key
+ * handshake; version-2 devices use an unauthenticated `0x5A5A` transport with no handshake.
  *
  * ```kotlin
- * val credentials = Setup.run().first()
+ * val credentials = Setup.run("you@example.com", "password").first()
  * MideaClient(credentials).use { client ->
  *     val state = client.refresh()
  *     println("${state.targetTemperature}°C ${OperationalMode.fromRaw(state.mode)}")
