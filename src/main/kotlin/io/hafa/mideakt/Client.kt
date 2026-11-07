@@ -37,8 +37,8 @@ class MideaClient(
     private val port = credentials.port
     private val deviceId = credentials.id
     private val version = credentials.version
-    private val token = credentials.token.hexToByteArray()
-    private val key = credentials.key.hexToByteArray()
+    private val token = credentials.token
+    private val key = credentials.key
 
     private var connection: MideaConnection? = null
     private var authenticatedAt = 0L

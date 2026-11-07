@@ -86,8 +86,8 @@ class SmartHomeCloud(private val account: String, private val password: String) 
         return SmartHomeSession(this, accessToken)
     }
 
-    /** Fetches the token/key pair, as hex, the cloud files under one byte order of [deviceId]. */
-    internal fun getToken(session: SmartHomeSession, deviceId: Long, bigEndian: Boolean): Pair<String, String> {
+    /** Fetches the token/key pair the cloud files under one byte order of [deviceId]. */
+    internal fun getToken(session: SmartHomeSession, deviceId: Long, bigEndian: Boolean): Pair<ByteArray, ByteArray> {
         val udpid = UDPID.compute(deviceId, bigEndian)
         val result = apiRequest(
             "/v1/iot/secure/getToken",
@@ -101,8 +101,8 @@ class SmartHomeCloud(private val account: String, private val password: String) 
         for (entry in list) {
             val entryObject = entry as? JsonObject ?: continue
             if (entryObject.string("udpId") == udpid) {
-                val token = entryObject.string("token")
-                val key = entryObject.string("key")
+                val token = entryObject.string("token")?.hexOrNull()
+                val key = entryObject.string("key")?.hexOrNull()
                 if (token != null && key != null) return token to key
             }
         }
@@ -195,6 +195,8 @@ class SmartHomeCloud(private val account: String, private val password: String) 
 }
 
 private fun JsonObject.string(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+
+private fun String.hexOrNull(): ByteArray? = runCatching { hexToByteArray() }.getOrNull()
 
 /** Computes the udpid the cloud uses to look up a device's token/key. */
 internal object UDPID {
