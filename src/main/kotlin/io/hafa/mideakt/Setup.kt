@@ -1,6 +1,7 @@
 package io.hafa.mideakt
 
 import java.util.concurrent.Executors
+import javax.net.SocketFactory
 
 /**
  * Thrown when [Setup.run] can't set up any device; [failures] holds each device it tried
@@ -49,7 +50,15 @@ data class SetupFailure(
  * Store the returned [DeviceCredentials] and hand them to [MideaClient]; setup only
  * needs to run again if a device is re-provisioned. To find devices that ignore
  * broadcasts, or over a particular network, run [Discovery.discover] yourself and pass
- * its result as `devices`.
+ * its result as `devices`. `socketFactory` makes the sockets for the local checks, as in
+ * [credentials].
+ *
+ * On Android, discovery and the local checks must use the Wi-Fi:
+ *
+ * ```kotlin
+ * val devices = Discovery.discover(bindSocket = wifi::bindSocket)
+ * val credentials = Setup.run("you@example.com", "password", devices, wifi.socketFactory)
+ * ```
  *
  * It returns credentials for every device it could set up, leaving out the rest. When
  * none could be set up it throws [NotInAccountException] if the cloud said a device
@@ -64,20 +73,30 @@ object Setup {
         account: String,
         password: String,
         devices: List<DiscoveredDevice> = Discovery.discover(),
-    ): List<DeviceCredentials> = run(SmartHomeCloud(account, password), devices)
+        socketFactory: SocketFactory = SocketFactory.getDefault(),
+    ): List<DeviceCredentials> = run(SmartHomeCloud(account, password), devices, socketFactory)
 
     /** Runs setup on [devices] against [cloud], signing in only if one is version 3; see [Setup]. */
-    fun run(cloud: SmartHomeCloud, devices: List<DiscoveredDevice> = Discovery.discover()): List<DeviceCredentials> =
-        provisionAll(cloud, devices)
+    fun run(
+        cloud: SmartHomeCloud,
+        devices: List<DiscoveredDevice> = Discovery.discover(),
+        socketFactory: SocketFactory = SocketFactory.getDefault(),
+    ): List<DeviceCredentials> = provisionAll(cloud, devices, socketFactory)
 
     /**
      * Runs setup on version-2 [devices], which need no account; a version-3 device among them
      * fails with [AccountRequiredException]. See [Setup].
      */
-    fun run(devices: List<DiscoveredDevice> = Discovery.discover()): List<DeviceCredentials> =
-        provisionAll(null, devices)
+    fun run(
+        devices: List<DiscoveredDevice> = Discovery.discover(),
+        socketFactory: SocketFactory = SocketFactory.getDefault(),
+    ): List<DeviceCredentials> = provisionAll(null, devices, socketFactory)
 
-    private fun provisionAll(cloud: SmartHomeCloud?, devices: List<DiscoveredDevice>): List<DeviceCredentials> {
+    private fun provisionAll(
+        cloud: SmartHomeCloud?,
+        devices: List<DiscoveredDevice>,
+        socketFactory: SocketFactory,
+    ): List<DeviceCredentials> {
         if (devices.isEmpty()) throw SetupException("No devices found")
         val session = if (cloud != null && devices.any { it.version >= 3 }) cloud.login() else null
 
@@ -85,7 +104,7 @@ object Setup {
         val pool = Executors.newFixedThreadPool(devices.size)
         val outcomes = try {
             devices.map { device ->
-                pool.submit<Result<DeviceCredentials>> { runCatching { credentials(device, session) } }
+                pool.submit<Result<DeviceCredentials>> { runCatching { credentials(device, session, socketFactory) } }
             }
                 .map { it.get() }
         } finally {
@@ -111,10 +130,18 @@ object Setup {
      * a version-3 device without one throws [AccountRequiredException]. Otherwise it throws
      * the error that best explains a failure: the device refusing a key, then
      * [DeviceNotInAccountException], then any other cloud error.
+     *
+     * [socketFactory] makes the sockets for the local check only; the cloud requests use the
+     * default network. On Android, pass a Wi-Fi `Network.socketFactory` so the check reaches
+     * the device while the cloud requests may use mobile data.
      */
     @Suppress("TooGenericExceptionCaught")
-    fun credentials(device: DiscoveredDevice, session: SmartHomeSession? = null): DeviceCredentials {
-        if (device.version < 3) return checked(DeviceCredentials(device))
+    fun credentials(
+        device: DiscoveredDevice,
+        session: SmartHomeSession? = null,
+        socketFactory: SocketFactory = SocketFactory.getDefault(),
+    ): DeviceCredentials {
+        if (device.version < 3) return checked(DeviceCredentials(device), socketFactory)
         if (session == null) throw AccountRequiredException()
         var cloudError: Exception? = null
         var checkError: Exception? = null
@@ -131,7 +158,7 @@ object Setup {
             }
             if (pair != null) {
                 try {
-                    return checked(DeviceCredentials(device, pair.first, pair.second))
+                    return checked(DeviceCredentials(device, pair.first, pair.second), socketFactory)
                 } catch (e: Exception) {
                     checkError = e
                 }
@@ -141,8 +168,8 @@ object Setup {
         throw checkError ?: cloudError!!
     }
 
-    private fun checked(credentials: DeviceCredentials): DeviceCredentials {
-        MideaClient(credentials).use { it.refresh() }
+    private fun checked(credentials: DeviceCredentials, socketFactory: SocketFactory): DeviceCredentials {
+        MideaClient(credentials, socketFactory = socketFactory).use { it.refresh() }
         return credentials
     }
 }

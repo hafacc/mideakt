@@ -119,6 +119,16 @@ API 26 covers essentially all active devices, so this is rarely a real
 constraint. Receiving UDP discovery replies may also require a
 `WifiManager.MulticastLock` on some devices.
 
+Discovery and the device connection must go over Wi-Fi, but when mobile data is
+the default network Android sends them there. Pass the Wi-Fi `Network` to both;
+the cloud requests stay on the default network:
+
+```kotlin
+val devices = Discovery.discover(bindSocket = wifi::bindSocket)
+val credentials = Setup.run("you@example.com", "pw", devices, wifi.socketFactory)
+val client = MideaClient(credentials.first(), socketFactory = wifi.socketFactory)
+```
+
 ## Design notes
 
 ### Post-authentication warm-up

@@ -4,6 +4,7 @@ import java.io.DataInputStream
 import java.io.OutputStream
 import java.net.InetSocketAddress
 import java.net.Socket
+import javax.net.SocketFactory
 import kotlin.random.Random
 
 /**
@@ -24,6 +25,7 @@ internal class MideaConnection(
     private val port: Int,
     private val deviceId: Long,
     private val version: Int,
+    private val socketFactory: SocketFactory = SocketFactory.getDefault(),
 ) {
     private var socket: Socket? = null
     private var input: DataInputStream? = null
@@ -32,7 +34,7 @@ internal class MideaConnection(
     private var localKey: ByteArray? = null
 
     fun connect(connectTimeoutMs: Int = 6000, readTimeoutMs: Int = 6000) {
-        val newSocket = Socket()
+        val newSocket = socketFactory.createSocket()
         newSocket.connect(InetSocketAddress(host, port), connectTimeoutMs)
         newSocket.soTimeout = readTimeoutMs
         socket = newSocket

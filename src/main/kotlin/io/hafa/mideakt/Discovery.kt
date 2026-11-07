@@ -34,14 +34,20 @@ object Discovery {
      *
      * Some modules ignore broadcasts and answer only a probe sent to their own address, so
      * [unicastTargets] are probed directly as well (for example every host on the subnet).
+     *
+     * [bindSocket] is called on the socket before any probe is sent, to choose the network
+     * discovery uses. On Android, pass a Wi-Fi `network::bindSocket` so the probes reach the
+     * Wi-Fi even when mobile data is the default network.
      */
     @Suppress("NestedBlockDepth", "LoopWithTooManyJumpStatements")
     fun discover(
         timeoutMs: Int = 4000,
         unicastTargets: Collection<InetAddress> = emptyList(),
+        bindSocket: (DatagramSocket) -> Unit = {},
     ): List<DiscoveredDevice> {
         val probe = PROBE_HEX.hexToByteArray()
         return DatagramSocket().use { socket ->
+            bindSocket(socket)
             socket.broadcast = true
             socket.soTimeout = 300
 
