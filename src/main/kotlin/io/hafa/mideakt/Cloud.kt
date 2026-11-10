@@ -40,6 +40,9 @@ class DeviceNotInAccountException(message: String) : CloudException(message, COD
     }
 }
 
+/** Thrown by [SmartHomeCloud.getToken] when the cloud has no pair for that byte order of the device id. */
+internal class KeyNotFoundException(message: String) : CloudException(message, null)
+
 /** A signed-in SmartHome session, from [SmartHomeCloud.login]; pass it to [Setup.credentials]. */
 class SmartHomeSession internal constructor(internal val cloud: SmartHomeCloud, internal val accessToken: String)
 
@@ -106,7 +109,7 @@ class SmartHomeCloud(private val account: String, private val password: String) 
                 if (token != null && key != null) return token to key
             }
         }
-        throw CloudException("No token/key for udpid $udpid", null)
+        throw KeyNotFoundException("No token/key for udpid $udpid")
     }
 
     private fun baseBody(data: Map<String, String>): JsonObject = buildJsonObject {

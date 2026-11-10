@@ -127,9 +127,13 @@ object Setup {
      * A version-3 device's key comes from the cloud through [session]. The cloud may file it
      * under either byte order of the device id and answer for both, so this fetches both
      * pairs and returns the one the device accepts. A version-2 device needs no [session];
-     * a version-3 device without one throws [AccountRequiredException]. Otherwise it throws
-     * the error that best explains a failure: the device refusing a key, then
-     * [DeviceNotInAccountException], then any other cloud error.
+     * a version-3 device without one throws [AccountRequiredException].
+     *
+     * Otherwise it throws the error that best explains a failure, in this order:
+     * - a local check error other than a rejection, such as a timeout or a refused connection;
+     * - a cloud error from a fetch, [DeviceNotInAccountException] first;
+     * - [HandshakeRejectedException], which also beats [DeviceNotInAccountException];
+     * - a [CloudException] saying the cloud has no pair for either byte order.
      *
      * [socketFactory] makes the sockets for the local check only; the cloud requests use the
      * default network. On Android, pass a Wi-Fi `Network.socketFactory` so the check reaches
@@ -145,11 +149,15 @@ object Setup {
         if (session == null) throw AccountRequiredException()
         var cloudError: Exception? = null
         var checkError: Exception? = null
+        var rejection: Exception? = null
+        var missing: Exception? = null
         for (bigEndian in listOf(false, true)) {
             val pair = try {
                 session.cloud.getToken(session, device.id, bigEndian)
+            } catch (e: KeyNotFoundException) {
+                missing = e
+                null
             } catch (e: DeviceNotInAccountException) {
-                // Not being the owner explains a failure better than a missing key does.
                 cloudError = e
                 null
             } catch (e: Exception) {
@@ -159,14 +167,29 @@ object Setup {
             if (pair != null) {
                 try {
                     return checked(DeviceCredentials(device, pair.first, pair.second), socketFactory)
+                } catch (e: HandshakeRejectedException) {
+                    rejection = e
                 } catch (e: Exception) {
                     checkError = e
                 }
             }
         }
-        // A key the device turned down says more than a byte order the cloud didn't know.
-        throw checkError ?: cloudError!!
+        throw credentialsError(checkError, cloudError, rejection, missing)
     }
+
+    /**
+     * The error [credentials] throws, given the last non-rejection [checkError], the most
+     * telling [cloudError], the last [rejection] and the last [missing] pair; at least one is set.
+     */
+    internal fun credentialsError(
+        checkError: Exception?,
+        cloudError: Exception?,
+        rejection: Exception?,
+        missing: Exception?,
+    ): Exception = checkError
+        ?: cloudError?.takeUnless { it is DeviceNotInAccountException && rejection != null }
+        ?: rejection
+        ?: missing!!
 
     private fun checked(credentials: DeviceCredentials, socketFactory: SocketFactory): DeviceCredentials {
         MideaClient(credentials, socketFactory = socketFactory).use { it.refresh() }
